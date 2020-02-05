@@ -19,6 +19,7 @@ type RegResponse struct {
 	Allowfrom  []string `json:"allowfrom"`
 }
 
+// APIUser is a struct providing the data to unregister
 type APIUser struct {
 	Username string `json:"username"`
 }
