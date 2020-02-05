@@ -71,6 +71,7 @@ func setupRouter(debug bool, noauth bool) http.Handler {
 		Debug:              Config.General.Debug,
 	})
 	api.POST("/register", webRegisterPost)
+	api.POST("/unregister", webUnregisterPost)
 	api.GET("/health", healthCheck)
 	if noauth {
 		api.POST("/update", noAuth(webUpdatePost))
@@ -189,6 +190,27 @@ func TestApiRegisterWithMockDB(t *testing.T) {
 		JSON().Object().
 		ContainsKey("error")
 	DB.SetBackend(oldDb)
+}
+
+func TestApiUnregisterBadUser(t *testing.T) {
+	unregisterJSON := map[string]interface{}{
+		"username": ""}
+
+	// Invalid username
+	unregisterJSON["username"] = "bad_username"
+
+	router := setupRouter(false, false)
+	server := httptest.NewServer(router)
+	defer server.Close()
+	e := getExpect(t, server)
+	response := e.POST("/unregister").
+		WithJSON(unregisterJSON).
+		Expect().
+		Status(http.StatusBadRequest).
+		JSON().Object().
+		ContainsKey("error")
+
+	response.Value("error").String().Equal("invalid_username")
 }
 
 func TestApiUpdateWithInvalidSubdomain(t *testing.T) {

@@ -19,6 +19,10 @@ type RegResponse struct {
 	Allowfrom  []string `json:"allowfrom"`
 }
 
+type APIUser struct {
+	Username string `json:"username"`
+}
+
 func webRegisterPost(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	var regStatus int
 	var reg []byte
@@ -69,6 +73,47 @@ func webRegisterPost(w http.ResponseWriter, r *http.Request, _ httprouter.Params
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(regStatus)
 	w.Write(reg)
+}
+
+func webUnregisterPost(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var unregStatus int
+	var unreg []byte
+	var err error
+	var upd []byte
+	userData := APIUser{}
+	bdata, _ := ioutil.ReadAll(r.Body)
+	if bdata != nil && len(bdata) > 0 {
+		err = json.Unmarshal(bdata, &userData)
+		if err != nil {
+			unregStatus = http.StatusBadRequest
+			unreg = jsonError("malformed_json_payload")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(unregStatus)
+			w.Write(unreg)
+			return
+		}
+	}
+
+	// Check for valid username
+	username, err := getValidUsername(userData.Username)
+	if err != nil {
+		unregStatus = http.StatusBadRequest
+		upd = jsonError("invalid_username")
+	} else {
+		// Delete user
+		err = DB.Unregister(username)
+		if err != nil {
+			unregStatus = http.StatusInternalServerError
+			upd = jsonError(fmt.Sprintf("%s (%v)", "delete_error", err))
+		} else {
+			log.WithFields(log.Fields{"user": username.String()}).Debug("Deleted user")
+			upd = []byte("{\"unregister\": \"" + username.String() + "\"}")
+			unregStatus = http.StatusOK
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(unregStatus)
+	w.Write(upd)
 }
 
 func webUpdatePost(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {

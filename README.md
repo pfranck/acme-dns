@@ -75,6 +75,26 @@ With the credentials, you can update the TXT response in the service to match th
 }
 ```
 
+### Unregister endpoint
+
+This method deletes a registered user and the associated TXT records from the database. The username has to be send as JSON input.
+
+#### Example input
+```json
+{
+    "username": "c2d7e8fd-ff4c-41c6-8f16-1d76628cbfde"
+}
+```
+
+#### Response
+
+```Status: 200 OK```
+```json
+{
+    "unregister": "c2d7e8fd-ff4c-41c6-8f16-1d76628cbfde"
+}
+```
+
 ### Update endpoint
 
 The method allows you to update the TXT answer contents of your unique subdomain. Usually carried automatically by automated ACME client.
