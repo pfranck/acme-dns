@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/julienschmidt/httprouter"
 	log "github.com/sirupsen/logrus"
 )
@@ -19,9 +20,10 @@ type RegResponse struct {
 	Allowfrom  []string `json:"allowfrom"`
 }
 
-// APIUser is a struct providing the data to unregister
-type APIUser struct {
-	Username string `json:"username"`
+// UnregRequest is a struct providing the data to unregister
+type UnregRequest struct {
+	Username  uuid.UUID `json:"username"`
+	Subdomain string    `json:"subdomain"`
 }
 
 func webRegisterPost(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -78,39 +80,24 @@ func webRegisterPost(w http.ResponseWriter, r *http.Request, _ httprouter.Params
 
 func webUnregisterPost(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	var unregStatus int
-	var unreg []byte
 	var err error
 	var upd []byte
-	userData := APIUser{}
-	bdata, _ := ioutil.ReadAll(r.Body)
-	if bdata != nil && len(bdata) > 0 {
-		err = json.Unmarshal(bdata, &userData)
-		if err != nil {
-			unregStatus = http.StatusBadRequest
-			unreg = jsonError("malformed_json_payload")
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(unregStatus)
-			w.Write(unreg)
-			return
-		}
+
+	// Get user data
+	unregData, ok := r.Context().Value(ACMETxtKey).(UnregRequest)
+	if !ok {
+		log.WithFields(log.Fields{"error": "context"}).Error("Context error")
 	}
 
-	// Check for valid username
-	username, err := getValidUsername(userData.Username)
+	// Delete user
+	err = DB.Unregister(unregData.Username)
 	if err != nil {
-		unregStatus = http.StatusBadRequest
-		upd = jsonError("invalid_username")
+		unregStatus = http.StatusInternalServerError
+		upd = jsonError(fmt.Sprintf("%s (%v)", "delete_error", err))
 	} else {
-		// Delete user
-		err = DB.Unregister(username)
-		if err != nil {
-			unregStatus = http.StatusInternalServerError
-			upd = jsonError(fmt.Sprintf("%s (%v)", "delete_error", err))
-		} else {
-			log.WithFields(log.Fields{"user": username.String()}).Debug("Deleted user")
-			upd = []byte("{\"unregister\": \"" + username.String() + "\"}")
-			unregStatus = http.StatusOK
-		}
+		log.WithFields(log.Fields{"user": unregData.Username.String()}).Debug("Deleted user")
+		upd = []byte("{\"unregister\": \"" + unregData.Username.String() + "\"}")
+		unregStatus = http.StatusOK
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(unregStatus)
