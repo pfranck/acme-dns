@@ -5,11 +5,13 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	stdlog "log"
 	"net/http"
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/go-acme/lego/v3/challenge/dns01"
 	legolog "github.com/go-acme/lego/v3/log"
@@ -90,6 +92,9 @@ func main() {
 
 	// HTTP API
 	go startHTTPAPI(errChan, Config, dnsservers)
+
+	// DB Maintainer
+	go startDbMaintainer(errChan, Config)
 
 	// block waiting for error
 	select {
@@ -210,5 +215,34 @@ func startHTTPAPI(errChan chan error, config DNSConfig, dnsservers []*DNSServer)
 	}
 	if err != nil {
 		errChan <- err
+	}
+}
+
+func startDbMaintainer(errChan chan error, config DNSConfig) {
+	// Setup http logger
+	logger := log.New()
+	logwriter := logger.Writer()
+	defer logwriter.Close()
+	// Setup logging for different dependencies to log with logrus
+	stdlog.SetOutput(logwriter)
+
+	// config.General.PurgeAccountDays
+	var PurgeAccountDays int = 999
+	for {
+		var sleepTime time.Duration = 3 * time.Second
+		log.Info(fmt.Sprintf("Sleeping for %d seconds", sleepTime))
+		time.Sleep(sleepTime)
+		log.WithFields(log.Fields{"PurgeAccountDays": PurgeAccountDays}).Info("Purging unsused users from database")
+		purgedUsers, err := DB.PurgeUnusedUsers(0)
+		if err != nil {
+			errChan <- err
+			break
+		}
+		// Write result to log
+		if purgedUsers > 0 {
+			log.Info(fmt.Sprintf("Purged %d user(s) from database", purgedUsers))
+		} else {
+			log.Info("No users are to be purged from database")
+		}
 	}
 }

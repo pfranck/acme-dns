@@ -210,6 +210,7 @@ func (d *acmedb) Register(afrom cidrslice) (ACMETxt, error) {
 }
 
 func (d *acmedb) Unregister(username uuid.UUID) error {
+	// fmt.Println("Unregister --- Test 1")
 	var err error
 
 	// Check if user exists
@@ -218,15 +219,20 @@ func (d *acmedb) Unregister(username uuid.UUID) error {
 		log.WithFields(log.Fields{"error": err.Error()}).Error("User doesn't exist")
 		return errors.New("User doesn't exist")
 	}
+	// fmt.Println("Unregister --- Test 2")
 
+	d.Lock()
+	defer d.Unlock()
 	tx, err := d.DB.Begin()
+	// fmt.Println("Unregister --- Test 3")
 
 	// Delete user's TXT records
-	err = d.DeleteTXTForDomain(user.Subdomain)
+	err = d.DeleteTXTForDomain(tx, user.Subdomain)
 	if err != nil {
 		log.WithFields(log.Fields{"error": err.Error()}).Error("Could not delete TXT records")
 		return err
 	}
+	// fmt.Println("Unregister --- Test 4")
 
 	// Rollback if errored, commit if not
 	defer func() {
@@ -234,12 +240,17 @@ func (d *acmedb) Unregister(username uuid.UUID) error {
 			tx.Rollback()
 			return
 		}
-		tx.Commit()
+		// fmt.Println("Unregister --- Commit")
+		err = tx.Commit()
+		if err != nil {
+			fmt.Println(err)
+		}
 	}()
 
 	// Delete user record
-	d.Lock()
-	defer d.Unlock()
+	// d.Lock()
+	// fmt.Println("Unregister --- Test 5")
+	// defer d.Unlock()
 	unregSQL := `
 	DELETE FROM records
         WHERE Username = $1`
@@ -253,6 +264,7 @@ func (d *acmedb) Unregister(username uuid.UUID) error {
 	}
 	defer sm.Close()
 	_, err = sm.Exec(username.String())
+	// fmt.Println("Unregister --- Test 6")
 	if err != nil {
 		log.WithFields(log.Fields{"error": err.Error()}).Error("Database error in execute")
 		return errors.New("SQL error")
@@ -361,16 +373,14 @@ func (d *acmedb) Update(a ACMETxtPost) error {
 	return nil
 }
 
-func (d *acmedb) DeleteTXTForDomain(domain string) error {
-	d.Lock()
-	defer d.Unlock()
+func (d *acmedb) DeleteTXTForDomain(tx *sql.Tx, domain string) error {
 	domain = sanitizeString(domain)
 	getSQL := `DELETE FROM txt WHERE Subdomain=$1`
 	if Config.Database.Engine == "sqlite3" {
 		getSQL = getSQLiteStmt(getSQL)
 	}
 
-	sm, err := d.DB.Prepare(getSQL)
+	sm, err := tx.Prepare(getSQL)
 	if err != nil {
 		return err
 	}
@@ -380,6 +390,59 @@ func (d *acmedb) DeleteTXTForDomain(domain string) error {
 		return err
 	}
 	return nil
+}
+
+func (d *acmedb) PurgeUnusedUsers(days int) (int, error) {
+	timeNow := time.Now()
+	tsMin := timeNow.AddDate(0, 0, days*-1).Unix()
+
+	getSQL := `
+	SELECT r.Username, MAX(t.LastUpdate) LatestUpdate
+	   FROM records r
+	   INNER JOIN txt t
+	   ON r.Subdomain = t.Subdomain
+	   GROUP BY r.Username
+	   HAVING LatestUpdate < $1`
+	if Config.Database.Engine == "sqlite3" {
+		getSQL = getSQLiteStmt(getSQL)
+	}
+
+	sm, err := d.DB.Prepare(getSQL)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := sm.Query(tsMin)
+	if err != nil {
+		return 0, err
+	}
+	sm.Close()
+	defer rows.Close()
+
+	type userToDelete struct {
+		user         uuid.UUID
+		LatestUpdate int
+	}
+	var usersToDelete = []userToDelete{}
+	for rows.Next() {
+		var userToDelete userToDelete
+		err = rows.Scan(&userToDelete.user, &userToDelete.LatestUpdate)
+		usersToDelete = append(usersToDelete, userToDelete)
+	}
+	rows.Close()
+
+	// Delete users
+	var deletedUsers int = 0
+	for _, userToDelete := range usersToDelete {
+		log.WithFields(log.Fields{"user": userToDelete.user.String(), "LatestUpdate": time.Unix(int64(userToDelete.LatestUpdate), 0)}).Info("Delete user")
+		err = DB.Unregister(userToDelete.user)
+		if err != nil {
+			log.Error(fmt.Sprintf("Could not delete user %s [%s]", userToDelete.user, err))
+			break
+		} else {
+			deletedUsers++
+		}
+	}
+	return deletedUsers, err
 }
 
 func getModelFromRow(r *sql.Rows) (ACMETxt, error) {

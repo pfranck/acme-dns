@@ -33,6 +33,7 @@ type general struct {
 	Nsadmin       string
 	Debug         bool
 	StaticRecords []string `toml:"records"`
+	// PurgeAccountDays uint
 }
 
 type dbsettings struct {
@@ -76,6 +77,7 @@ type database interface {
 	GetByUsername(uuid.UUID) (ACMETxt, error)
 	GetTXTForDomain(string) ([]string, error)
 	Update(ACMETxtPost) error
+	PurgeUnusedUsers(int) (int, error)
 	GetBackend() *sql.DB
 	SetBackend(*sql.DB)
 	Close()
